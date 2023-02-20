@@ -17,15 +17,15 @@ import (
 
 const (
 	MINING_DIFFICULTY = 3
-	MINING_SENDER     = "THE BLOCKCHAIN"
-	MINING_REWARD     = 1.0
-	MINING_TIMER_SEC  = 20
+	MINING_SENDER     = "14FG2MnvQ8wG27uqx21Bst4343WCY9MbQB"
+	MINING_REWARD     = 0.01
+	MINING_TIMER_SEC  = 1
 
-	BLOCKCHAIN_PORT_RANGE_START      = 5000
-	BLOCKCHAIN_PORT_RANGE_END        = 5003
+	BLOCKCHAIN_PORT_RANGE_START      = 5001
+	BLOCKCHAIN_PORT_RANGE_END        = 5005
 	NEIGHBOR_IP_RANGE_START          = 0
 	NEIGHBOR_IP_RANGE_END            = 1
-	BLOCKCHIN_NEIGHBOR_SYNC_TIME_SEC = 20
+	BLOCKCHIN_NEIGHBOR_SYNC_TIME_SEC = 30
 )
 
 type Block struct {
@@ -33,6 +33,37 @@ type Block struct {
 	nonce        int
 	previousHash [32]byte
 	transactions []*Transaction
+}
+
+type Transaction struct {
+	senderBlockchainAddress    string
+	recipientBlockchainAddress string
+	value                      float32
+	trxHash                    [32]byte
+}
+
+type Blockchain struct {
+	transactionPool   []*Transaction
+	chain             []*Block
+	blockchainAddress string
+	port              uint16
+	mux               sync.Mutex
+	neighbors         []string
+	muxNeighbors      sync.Mutex
+}
+
+type originalTransaction struct {
+	senderBlockchainAddress    string
+	recipientBlockchainAddress string
+	value                      float32
+}
+
+type TransactionRequest struct {
+	SenderBlockchainAddress    *string  `json:"sender_blockchain_address"`
+	RecipientBlockchainAddress *string  `json:"recipient_blockchain_address"`
+	SenderPublicKey            *string  `json:"sender_public_key"`
+	Value                      *float32 `json:"value"`
+	Signature                  *string  `json:"signature"`
 }
 
 func NewBlock(nonce int, previousHash [32]byte, transactions []*Transaction) *Block {
@@ -105,16 +136,6 @@ func (b *Block) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-type Blockchain struct {
-	transactionPool   []*Transaction
-	chain             []*Block
-	blockchainAddress string
-	port              uint16
-	mux               sync.Mutex
-	neighbors         []string
-	muxNeighbors      sync.Mutex
-}
-
 func NewBlockchain(blockchainAddress string, port uint16) *Blockchain {
 	b := &Block{}
 	bc := new(Blockchain)
@@ -135,7 +156,6 @@ func (bc *Blockchain) Run() {
 }
 
 func (bc *Blockchain) SetNeighbors() {
-	fmt.Print("finding neighbors called")
 	bc.neighbors = utils.FindNeighbors(
 		utils.GetHost(), bc.port,
 		NEIGHBOR_IP_RANGE_START, NEIGHBOR_IP_RANGE_END,
@@ -236,13 +256,14 @@ func (bc *Blockchain) CreateTransaction(sender string, recipient string, value f
 func (bc *Blockchain) AddTransaction(sender string, recipient string, value float32,
 	senderPublicKey *ecdsa.PublicKey, s *utils.Signature) bool {
 	t := NewTransaction(sender, recipient, value)
+	o := &originalTransaction{sender, recipient, value}
 
 	if sender == MINING_SENDER {
 		bc.transactionPool = append(bc.transactionPool, t)
 		return true
 	}
 
-	if bc.VerifyTransactionSignature(senderPublicKey, s, t) {
+	if bc.VerifyTransactionSignature(senderPublicKey, s, o) {
 		if bc.CalculateTotalAmount(sender) < value {
 			log.Println("ERROR: Not enough balance in a wallet")
 			return false
@@ -257,7 +278,7 @@ func (bc *Blockchain) AddTransaction(sender string, recipient string, value floa
 }
 
 func (bc *Blockchain) VerifyTransactionSignature(
-	senderPublicKey *ecdsa.PublicKey, s *utils.Signature, t *Transaction) bool {
+	senderPublicKey *ecdsa.PublicKey, s *utils.Signature, t *originalTransaction) bool {
 	m, _ := json.Marshal(t)
 	h := sha256.Sum256([]byte(m))
 	return ecdsa.Verify(senderPublicKey, h[:], s.R, s.S)
@@ -292,8 +313,10 @@ func (bc *Blockchain) ProofOfWork() int {
 }
 
 func (bc *Blockchain) Mining() bool {
+	// https://go.dev/tour/concurrency/9
+
 	bc.mux.Lock()
-	defer bc.mux.Unlock()
+	defer bc.mux.Unlock() // defer placed code at the end of program
 
 	if len(bc.transactionPool) == 0 {
 		return false
@@ -387,14 +410,14 @@ func (bc *Blockchain) ResolveConflicts() bool {
 	return false
 }
 
-type Transaction struct {
-	senderBlockchainAddress    string
-	recipientBlockchainAddress string
-	value                      float32
+func (a *originalTransaction) Hash() [32]byte {
+	m, _ := json.Marshal(a)
+	return sha256.Sum256([]byte(m))
 }
 
 func NewTransaction(sender string, recipient string, value float32) *Transaction {
-	return &Transaction{sender, recipient, value}
+	t := &originalTransaction{sender, recipient, value}
+	return &Transaction{sender, recipient, value, t.Hash()}
 }
 
 func (t *Transaction) Print() {
@@ -404,7 +427,7 @@ func (t *Transaction) Print() {
 	fmt.Printf(" value                          %.1f\n", t.value)
 }
 
-func (t *Transaction) MarshalJSON() ([]byte, error) {
+func (t *originalTransaction) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Sender    string  `json:"sender_blockchain_address"`
 		Recipient string  `json:"recipient_blockchain_address"`
@@ -416,28 +439,36 @@ func (t *Transaction) MarshalJSON() ([]byte, error) {
 	})
 }
 
+func (t *Transaction) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Sender    string  `json:"sender_blockchain_address"`
+		Recipient string  `json:"recipient_blockchain_address"`
+		Value     float32 `json:"value"`
+		TrxHash   string  `json:"transaction_hash"`
+	}{
+		Sender:    t.senderBlockchainAddress,
+		Recipient: t.recipientBlockchainAddress,
+		Value:     t.value,
+		TrxHash:   fmt.Sprintf("%x", t.trxHash),
+	})
+}
+
 func (t *Transaction) UnmarshalJSON(data []byte) error {
 	v := &struct {
-		Sender    *string  `json:"sender_blockchain_address"`
-		Recipient *string  `json:"recipient_blockchain_address"`
-		Value     *float32 `json:"value"`
+		Sender    *string   `json:"sender_blockchain_address"`
+		Recipient *string   `json:"recipient_blockchain_address"`
+		Value     *float32  `json:"value"`
+		TrxHash   *[32]byte `json:"transaction_hash"`
 	}{
 		Sender:    &t.senderBlockchainAddress,
 		Recipient: &t.recipientBlockchainAddress,
 		Value:     &t.value,
+		TrxHash:   &t.trxHash,
 	}
 	if err := json.Unmarshal(data, &v); err != nil {
 		return err
 	}
 	return nil
-}
-
-type TransactionRequest struct {
-	SenderBlockchainAddress    *string  `json:"sender_blockchain_address"`
-	RecipientBlockchainAddress *string  `json:"recipient_blockchain_address"`
-	SenderPublicKey            *string  `json:"sender_public_key"`
-	Value                      *float32 `json:"value"`
-	Signature                  *string  `json:"signature"`
 }
 
 func (tr *TransactionRequest) Validate() bool {

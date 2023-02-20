@@ -54,5 +54,5 @@ func GetHost() string {
 	if err != nil {
 		return "127.0.0.1"
 	}
-	return address[2]
+	return address[1]
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"goblockchain/block"
 	"goblockchain/utils"
 	"goblockchain/wallet"
@@ -41,6 +42,7 @@ func (bcs *BlockchainServer) GetBlockchain() *block.Blockchain {
 func (bcs *BlockchainServer) GetChain(w http.ResponseWriter, req *http.Request) {
 	switch req.Method {
 	case http.MethodGet:
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Add("Content-Type", "application/json")
 		bc := bcs.GetBlockchain()
 		m, _ := bc.MarshalJSON()
@@ -83,11 +85,13 @@ func (bcs *BlockchainServer) Transactions(w http.ResponseWriter, req *http.Reque
 		publicKey := utils.PublicKeyFromString(*t.SenderPublicKey)
 		signature := utils.SignatureFromString(*t.Signature)
 		bc := bcs.GetBlockchain()
+
+		var m []byte
+		// if bc.CalculateTotalAmount(*t.SenderBlockchainAddress) >= *t.Value {
 		isCreated := bc.CreateTransaction(*t.SenderBlockchainAddress,
 			*t.RecipientBlockchainAddress, *t.Value, publicKey, signature)
 
 		w.Header().Add("Content-Type", "application/json")
-		var m []byte
 		if !isCreated {
 			w.WriteHeader(http.StatusBadRequest)
 			m = utils.JsonStatus("fail")
@@ -95,6 +99,8 @@ func (bcs *BlockchainServer) Transactions(w http.ResponseWriter, req *http.Reque
 			w.WriteHeader(http.StatusCreated)
 			m = utils.JsonStatus("success")
 		}
+
+		// }
 		io.WriteString(w, string(m))
 	case http.MethodPut:
 		decoder := json.NewDecoder(req.Body)
@@ -194,6 +200,7 @@ func (bcs *BlockchainServer) Consensus(w http.ResponseWriter, req *http.Request)
 	case http.MethodPut:
 		bc := bcs.GetBlockchain()
 		replaced := bc.ResolveConflicts()
+		fmt.Println(replaced)
 
 		w.Header().Add("Content-Type", "application/json")
 		if replaced {
