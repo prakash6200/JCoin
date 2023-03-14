@@ -14,4 +14,4 @@ EXPOSE 8080
 
 ENV GIN_MODE=release
 
-RUN go run main.go blockchian_server.go
+CMD cd blockchain_server/ blockchian_server
