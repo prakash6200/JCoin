@@ -14,4 +14,4 @@ EXPOSE 8080
 
 ENV GIN_MODE=release
 
-CMD cd blockchain_server/ blockchian_server
+CMD /blockchian_server
