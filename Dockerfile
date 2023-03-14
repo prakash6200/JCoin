@@ -8,7 +8,7 @@ RUN go mod download
 
 COPY . .
 
-RUN go build
+RUN cd blockchain_server/ go build
 
 EXPOSE 8080
 
