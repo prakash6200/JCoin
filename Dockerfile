@@ -14,4 +14,4 @@ EXPOSE 8080
 
 ENV GIN_MODE=release
 
-CMD sudo ./blockchain_server
+RUN go run main.go blockchian_server.go
