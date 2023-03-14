@@ -8,10 +8,10 @@ RUN go mod download
 
 COPY . .
 
-RUN cd blockchain_server/ go build
+RUN cd blockchain_server/ go build -o /docker-gs-ping
 
 EXPOSE 8080
 
 ENV GIN_MODE=release
 
-CMD ./golang-demo
+CMD [ "/docker-gs-ping" ]
